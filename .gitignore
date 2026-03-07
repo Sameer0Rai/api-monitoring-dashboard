@@ -1,0 +1,16 @@
+# Backend
+target/
+.settings/
+.classpath
+.project
+
+# Frontend
+node_modules/
+dist/
+
+# General
+.env
+.DS_Store
+
+# local config
+application-local.properties
