@@ -1,0 +1,79 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: monitor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-api_monitor}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-api_monitor}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - monitor-network
+
+  backend:
+    build:
+      context: ./api-monitor-backend
+      dockerfile: Dockerfile
+    container_name: monitor-backend
+    restart: unless-stopped
+    # The backend crash-loops if it starts before Postgres is accepting connections,
+    # so it waits for the healthcheck above rather than just container-start order.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-api_monitor}
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      JPA_DDL_AUTO: ${JPA_DDL_AUTO:-update}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      MONITOR_SCHEDULER_FIXED_RATE_MS: ${MONITOR_SCHEDULER_FIXED_RATE_MS:-60000}
+      MONITOR_HEALTHCHECK_TIMEOUT_MS: ${MONITOR_HEALTHCHECK_TIMEOUT_MS:-5000}
+      MONITOR_HEALTHCHECK_CONCURRENCY: ${MONITOR_HEALTHCHECK_CONCURRENCY:-8}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    healthcheck:
+      # No Actuator yet (deliberately deferred - see README roadmap), so this hits
+      # the real services endpoint. It 200s once the app context is up and the
+      # datasource connection works, which is what we actually care about here.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/services >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - monitor-network
+
+  frontend:
+    build:
+      context: ./api-monitor-frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: monitor-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    networks:
+      - monitor-network
+
+networks:
+  monitor-network:
+    driver: bridge
+
+volumes:
+  postgres-data:

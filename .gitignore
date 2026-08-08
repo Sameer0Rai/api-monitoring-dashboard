@@ -1,16 +1,19 @@
 # Backend
-target/
-.settings/
-.classpath
-.project
+api-monitor-backend/target/
+api-monitor-backend/.settings/
+api-monitor-backend/.classpath
+api-monitor-backend/.project
+*.iml
 
 # Frontend
-node_modules/
-dist/
+api-monitor-frontend/node_modules/
+api-monitor-frontend/dist/
 
-# General
+# Environment
 .env
-.DS_Store
+.env.local
 
-# local config
-application-local.properties
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
