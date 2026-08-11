@@ -8,11 +8,11 @@ spring:
   jpa:
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:update}
-      dialect: org.hibernate.dialect.PostgreSQL17Dialect
     open-in-view: false
     properties:
       hibernate:
         format_sql: false
+        dialect: org.hibernate.dialect.PostgreSQLDialect
 
 server:
   port: ${SERVER_PORT:8080}
