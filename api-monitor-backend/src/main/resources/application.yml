@@ -8,6 +8,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:update}
+      dialect: org.hibernate.dialect.PostgreSQL17Dialect
     open-in-view: false
     properties:
       hibernate:
