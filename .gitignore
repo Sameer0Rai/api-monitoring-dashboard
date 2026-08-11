@@ -17,3 +17,9 @@ api-monitor-frontend/dist/
 .idea/
 .vscode/
 .DS_Store
+
+# Personal notes - not meant to be shared/committed
+interview-prep.md
+workflow.md
+dataflow.md
+implementation.md

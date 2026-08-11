@@ -37,17 +37,26 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
       JPA_DDL_AUTO: ${JPA_DDL_AUTO:-update}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
-      MONITOR_SCHEDULER_FIXED_RATE_MS: ${MONITOR_SCHEDULER_FIXED_RATE_MS:-60000}
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set - see .env.example. Generate one with: openssl rand -base64 48}"
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MONITOR_SCHEDULER_FIXED_RATE_MS: ${MONITOR_SCHEDULER_FIXED_RATE_MS:-15000}
       MONITOR_HEALTHCHECK_TIMEOUT_MS: ${MONITOR_HEALTHCHECK_TIMEOUT_MS:-5000}
       MONITOR_HEALTHCHECK_CONCURRENCY: ${MONITOR_HEALTHCHECK_CONCURRENCY:-8}
+      MONITOR_HEALTHCHECK_DEFAULT_INTERVAL_S: ${MONITOR_HEALTHCHECK_DEFAULT_INTERVAL_S:-60}
+      MONITOR_HEALTHCHECK_MIN_INTERVAL_S: ${MONITOR_HEALTHCHECK_MIN_INTERVAL_S:-15}
+      MONITOR_HEALTHCHECK_MAX_INTERVAL_S: ${MONITOR_HEALTHCHECK_MAX_INTERVAL_S:-3600}
+      MONITOR_ANALYTICS_WINDOW_DAYS: ${MONITOR_ANALYTICS_WINDOW_DAYS:-30}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "${SERVER_PORT:-8080}:8080"
     healthcheck:
-      # No Actuator yet (deliberately deferred - see README roadmap), so this hits
-      # the real services endpoint. It 200s once the app context is up and the
-      # datasource connection works, which is what we actually care about here.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/services >/dev/null 2>&1 || exit 1"]
+      # Spring Boot Actuator's health endpoint - reflects real readiness (DB connectivity
+      # included), not just "the process is running".
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10

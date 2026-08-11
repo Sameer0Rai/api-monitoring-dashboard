@@ -1,219 +1,288 @@
 # API Monitoring Dashboard
 
-A small full-stack application that periodically checks a set of HTTP endpoints and
-reports their status, latency, and uptime on a live dashboard.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Java 17](https://img.shields.io/badge/Java-17-orange)
+![Spring Boot 3.2](https://img.shields.io/badge/Spring%20Boot-3.2-brightgreen)
+![React 18](https://img.shields.io/badge/React-18-61DAFB)
+![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16-4169E1)
 
-This is **v0.2** of the project: a from-scratch architectural refactor of the original
-prototype. Functionality is unchanged from the user's point of view - register a URL,
-watch it get checked every 60 seconds, see uptime/latency on the dashboard - but the
-internals were rebuilt to be a foundation the project can actually grow on (auth,
-alerts, per-service config, deployment, etc.), not a rewrite every time a new feature
-is added.
+A self-hosted, multi-user API uptime and latency monitoring platform. Register the
+endpoints you care about and it checks them on your own schedule, retries transient
+failures before declaring them down, and turns that history into a live dashboard plus
+historical analytics — uptime %, latency trends, outage counts, recovery time — all
+backed by Postgres, not just whatever happens to be in memory.
+
+## Features
+
+- **JWT authentication** with per-user data ownership — every service and its history
+  belongs to exactly one account; another user's data is never reachable, not even to
+  confirm it exists (a request for a service you don't own 404s, not 403s).
+- **Non-blocking health-check engine** — a scheduler tick checks every due service
+  concurrently via a reactive HTTP client, with per-service intervals, timeouts, and
+  exponential-backoff retry on transient network failures.
+- **SSRF-hardened by default** — every submitted URL is validated against private,
+  loopback, link-local, and reserved address ranges (via real DNS resolution, not just
+  string matching), re-checked immediately before every single health check, and
+  redirects are never followed blindly.
+- **Historical analytics** — uptime/downtime percentage, fastest/slowest/average
+  response time, and outage + recovery-time detection over a configurable time window.
+- **Live dashboard** — status, latency sparklines, and uptime meters per service, with
+  search, status filters, and a guided quick-start for new accounts.
+- **Docker-first deployment** — one command brings up Postgres, the API, and an
+  Nginx-served frontend, wired together with healthchecks.
 
 ## Architecture
 
-```
-┌─────────────────┐        HTTP        ┌──────────────────┐      JDBC      ┌────────────┐
-│  React (Vite)    │ ─────────────────▶ │  Spring Boot API  │ ──────────────▶ │ PostgreSQL │
-│  Dashboard SPA   │ ◀───────────────── │  (MVC + WebClient)│ ◀────────────── │            │
-└─────────────────┘   JSON (ApiResponse) └──────────────────┘                └────────────┘
-                                                  │
-                                                  │ @Scheduled, every N seconds
-                                                  ▼
-                                     ┌───────────────────────────┐
-                                     │ HealthCheckService         │
-                                     │ concurrent, non-blocking   │
-                                     │ WebClient calls with retry │
-                                     │ + exponential backoff      │
-                                     └───────────────────────────┘
-                                                  │
-                                                  ▼
-                                     any HTTP endpoint the user registers
-```
+```mermaid
+flowchart LR
+    subgraph Client
+        FE["React SPA (Vite)"]
+    end
 
-**Why WebClient instead of RestTemplate for the health checks:** RestTemplate is
-blocking and has been in maintenance mode since Spring 5. With N monitored services,
-a blocking sequential loop means one slow or hanging endpoint delays the check of
-every other endpoint behind it. WebClient lets the scheduler fire all checks
-concurrently (bounded by `monitor.health-check.concurrency`) using Reactor's
-non-blocking I/O. The rest of the app (controllers, JPA) is still plain, synchronous
-Spring MVC - only the outbound health-check calls are reactive. See
-`HealthCheckService` for the full reasoning in code comments, including how blocking
-database writes are safely mixed into that reactive pipeline (`Schedulers.boundedElastic()`).
+    subgraph Backend["Spring Boot API"]
+        SEC["Security filter chain\n(stateless JWT auth)"]
+        MVC["Controllers + services\n(sync Spring MVC)"]
+        SCHED["HealthCheckScheduler\ntick every 15s"]
+        WC["WebClient\nconcurrent, non-blocking"]
+    end
 
-## Folder structure
+    DB[(PostgreSQL)]
+    EXT["Any HTTP endpoint\nthe user registers"]
 
-```
-api-monitoring-dashboard/
-├── api-monitor-backend/
-│   ├── src/main/java/com/monitor/
-│   │   ├── config/         # WebClient, CORS, and typed @ConfigurationProperties
-│   │   ├── controller/     # Thin HTTP layer only - no business logic
-│   │   ├── dto/             # request/ and response/ - never expose entities directly
-│   │   ├── exception/      # Global exception handler + custom exceptions
-│   │   ├── mapper/         # Entity <-> DTO conversion
-│   │   ├── model/           # JPA entities
-│   │   ├── repository/     # Spring Data repositories
-│   │   ├── scheduler/      # Fixed-rate trigger, delegates all real work to service/
-│   │   └── service/         # Business logic (this is where most of the real code lives)
-│   ├── src/main/resources/application.yml
-│   └── Dockerfile
-├── api-monitor-frontend/
-│   └── src/
-│       ├── api/            # axios client + thin endpoint wrappers
-│       ├── components/     # Small, reusable presentational components
-│       ├── config/          # Env var access, in one place
-│       ├── hooks/           # useServices - all data-fetching/polling logic
-│       ├── pages/           # Dashboard (routing is wired up for future pages)
-│       └── styles/
-├── docker-compose.yml
-└── .env.example
+    FE -- "HTTP + JWT / JSON (ApiResponse envelope)" --> SEC
+    SEC --> MVC
+    MVC -- JDBC --> DB
+    SCHED -- "which services are due?" --> WC
+    WC -- "result -> ApiLog row" --> DB
+    WC -- GET --> EXT
 ```
 
-## Database design
+**Why WebClient instead of RestTemplate:** non-blocking, so N monitored services are
+checked concurrently instead of one slow endpoint delaying every check behind it.
+Controllers stay plain, synchronous Spring MVC — only the outbound health-check calls
+are reactive.
 
-```
-api_services                    api_logs
-┌────────────────┐              ┌───────────────────────┐
-│ id (PK)          │◀────────┐   │ id (PK)                │
-│ name              │        └──│ api_service_id (FK)    │
-│ url                │            │ status_code            │
-│ created_at         │            │ response_time_ms       │
-└────────────────┘            │ success                │
-                                 │ checked_at              │
-                                 └───────────────────────┘
-                                 index: (api_service_id, checked_at)
-```
+**Why a scheduler "tick" instead of one job per service:** each service has its own
+`intervalSeconds`. Rather than one `@Scheduled` task per service (operationally messy,
+doesn't scale cleanly), a single lightweight tick runs frequently (default 15s) and
+asks "which services are actually due?" — a cheap in-memory filter over service
+metadata — then checks only those, concurrently.
 
-Two changes from the original schema, both fixing real correctness/scale issues:
+## Technology stack
 
-- `api_logs.api_service_id` is now a genuine foreign key (`@ManyToOne`) instead of a
-  bare `Long`, so the database enforces referential integrity and deleting a service
-  cascades its logs.
-- `success` is computed and stored once at write time instead of every reader
-  re-deriving "is this a success?" from `status_code == 200` (which was also wrong for
-  any 2xx that isn't exactly 200).
+**Backend:** Java 17, Spring Boot 3.2 (Web, WebFlux/WebClient, Data JPA, Security,
+Validation, Actuator), PostgreSQL 16, JWT (jjwt 0.12), springdoc-openapi, Lombok, Maven.
 
-**Why PostgreSQL over MySQL:** the project isn't using anything MySQL-specific, and
-Postgres has a few concrete advantages for where this is headed - first-class support
-on essentially every free-tier PaaS this project is likely to deploy to (Railway,
-Render, Neon, Supabase), stronger JSON/array column types that later features
-(tags, alert-preference blobs) will likely want, and it avoids any ambiguity around
-MySQL's Oracle stewardship. Migration touched the JDBC driver/dialect (Hibernate
-auto-detects the dialect from the driver), `application.yml`, and `docker-compose.yml`.
+**Frontend:** React 18, Vite, React Router, Tailwind CSS, Recharts, lucide-react, axios.
 
-## How monitoring works
+**Infra:** Docker, Docker Compose, multi-stage builds, Nginx (frontend), healthchecks
+throughout.
 
-1. `HealthCheckScheduler` fires every `monitor.scheduler.fixed-rate-ms` (default 60s).
-2. `HealthCheckService` loads every registered service and checks them **concurrently**
-   (bounded by `monitor.health-check.concurrency`), not sequentially.
-3. Each check calls the target URL via WebClient with a response timeout
-   (`monitor.health-check.request-timeout-ms`). Network-level failures (timeout, DNS,
-   connection refused) are retried with exponential backoff
-   (`monitor.health-check.max-retries` attempts) before being recorded as a failure.
-   A real HTTP error response (4xx/5xx) is recorded immediately - it's a real answer
-   from the server, not a transient failure worth retrying.
-4. Each result is written as one `ApiLog` row.
-5. `GET /api/services/metrics/{id}` aggregates all logs for a service in the database
-   (`COUNT`/`AVG`/`SUM`, not pulled into the JVM) into uptime %, average latency, and a
-   HEALTHY / SLOW / DOWN / UNKNOWN classification, using thresholds from
-   `monitor.status.*`.
-6. `GET /api/services/logs/{id}` returns the most recent logs (bounded by
-   `monitor.logs.default-limit` / `max-limit`), oldest-first, for the latency chart -
-   replacing the original endpoint's "return every log this service has ever produced,"
-   unbounded query.
+## Quick start with Docker (recommended)
 
-## API
+```bash
+cp .env.example .env
+# REQUIRED: set a real JWT_SECRET in .env - compose refuses to start otherwise.
+# Generate one with:  openssl rand -base64 48
 
-Every response is wrapped consistently:
-
-```jsonc
-// success
-{ "success": true, "data": { ... }, "timestamp": "..." }
-// failure
-{ "success": false, "message": "...", "data": null, "timestamp": "..." }
+docker compose up --build
 ```
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/services` | List all monitored services |
-| POST | `/api/services` | Register a new service (`{ "name", "url" }`, validated) |
-| GET | `/api/services/logs/{id}?limit=` | Recent logs for a service |
-| GET | `/api/services/metrics/{id}` | Uptime, average latency, status for a service |
-| GET | `/api/services/summary` | Total number of registered services |
+That's the entire setup — no manual PostgreSQL install, no separate migration step.
 
-## Running locally (without Docker)
+- **postgres** — Postgres 16, data persisted in a named volume, gated by `pg_isready`.
+- **backend** — waits for Postgres to be healthy, exposes `8080`, healthchecked via
+  `/actuator/health`.
+- **frontend** — Nginx serving the production Vite build, waits for the backend
+  healthcheck, exposes `5173`, reverse-proxies `/api/*`, `/actuator/*`, and
+  `/swagger-ui*` to the backend container.
+
+Open `http://localhost:5173`, register an account, and add your first service.
+
+## Running locally without Docker
 
 Requires Java 17+, Node 20+, and a local PostgreSQL instance.
 
 ```bash
-# 1. Start Postgres and create the database
 createdb api_monitor
 
-# 2. Backend
 cd api-monitor-backend
-export DB_USERNAME=postgres DB_PASSWORD=yourpassword
+export DB_USERNAME=postgres DB_PASSWORD=yourpassword JWT_SECRET=$(openssl rand -base64 48)
 mvn spring-boot:run
 
-# 3. Frontend (separate terminal)
+# separate terminal
 cd api-monitor-frontend
 cp .env.example .env
 npm install
 npm run dev
 ```
 
-The frontend dev server runs at `http://localhost:5173` and talks directly to the
-backend at `http://localhost:8080` (CORS is configured for this by default).
+(`application.yml` has a fallback JWT secret for exactly this convenience — it's not
+production-safe and is never used by the Docker path, which requires `JWT_SECRET`
+explicitly.)
 
-## Running with Docker
+## How monitoring works
 
-```bash
-cp .env.example .env   # adjust if you want non-default credentials/ports
-docker compose up --build
+1. `HealthCheckScheduler` ticks every `monitor.scheduler.fixed-rate-ms` (default 15s).
+2. `HealthCheckService` loads every service and filters to those where
+   `now - lastCheckedAt >= intervalSeconds` (or never checked).
+3. Due services are checked **concurrently** (bounded by
+   `monitor.health-check.concurrency`) via WebClient, with a per-request timeout.
+   Network-level failures (timeout, DNS, connection refused) retry with exponential
+   backoff before being recorded as a failure; a real HTTP error response (4xx/5xx) is
+   recorded immediately.
+4. Each result is written as one `ApiLog` row, and the service's `lastCheckedAt` is
+   updated in the same pass.
+5. `GET /api/services/metrics/{id}` aggregates *all-time* logs (DB-side `COUNT`/`AVG`/
+   `SUM`, not pulled into the JVM) into uptime %, average latency, and a HEALTHY / SLOW
+   / DOWN / UNKNOWN classification.
+6. `GET /api/services/{id}/analytics` aggregates a *windowed* view (default last 30
+   days, configurable) plus outage/recovery detection: a single forward pass over the
+   window's ordered logs finds success→failure→success transitions.
+
+## Database schema
+
+```mermaid
+erDiagram
+    USERS ||--o{ API_SERVICES : "owner_id FK"
+    API_SERVICES ||--o{ API_LOGS : "api_service_id FK, cascade delete"
+
+    USERS {
+        bigint id PK
+        text email UK
+        text password_hash
+        text role
+        timestamp created_at
+    }
+    API_SERVICES {
+        bigint id PK
+        bigint owner_id FK
+        text name
+        text url
+        int interval_seconds
+        timestamp last_checked_at
+        timestamp created_at
+    }
+    API_LOGS {
+        bigint id PK
+        bigint api_service_id FK
+        int status_code
+        int response_time_ms
+        boolean success
+        timestamp checked_at
+    }
 ```
 
-That's it - `docker compose up` builds and starts all three services:
+- `api_services.owner_id` is a real FK to `users` — every read/write is scoped to it at
+  the repository layer (`findByIdAndOwnerId`, `findAllByOwnerId`), not just filtered in
+  the controller, so there's no code path that can leak one user's data to another.
+- `api_logs` is indexed on `(api_service_id, checked_at)` — every read pattern (recent
+  history, live metrics, windowed analytics) filters and orders on exactly those columns.
 
-- **postgres** - Postgres 16, data persisted in a named volume (`postgres-data`), gated
-  by a `pg_isready` healthcheck.
-- **backend** - waits for Postgres to be healthy before starting (avoids the classic
-  crash-loop-on-cold-start problem), exposes `8080`.
-- **frontend** - Nginx serving the production Vite build, waits for the backend
-  healthcheck, exposes `5173` (mapped to Nginx's port 80) and reverse-proxies `/api/*`
-  to the backend container over the internal Docker network - so the browser never
-  needs to know the backend's address.
+## API reference
 
-Open `http://localhost:5173`.
+Every response is wrapped consistently:
+```jsonc
+{ "success": true, "data": { ... }, "timestamp": "..." }
+{ "success": false, "message": "...", "data": null, "timestamp": "..." }
+```
+
+Full interactive documentation: **`http://localhost:8080/swagger-ui.html`** once running
+(register, log in, click "Authorize", paste the token, try any endpoint from the UI).
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/auth/register` | Public | Create an account, returns a JWT |
+| POST | `/api/auth/login` | Public | Exchange credentials for a JWT |
+| POST | `/api/auth/forgot-password` | Public | Request a password reset email |
+| POST | `/api/auth/reset-password` | Public | Reset password with a valid token |
+| GET | `/api/services` | Bearer | List your monitored services |
+| POST | `/api/services` | Bearer | Register a service (`name`, `url`, optional `intervalSeconds`) |
+| GET | `/api/services/{id}` | Bearer | Get a single service |
+| DELETE | `/api/services/{id}` | Bearer | Remove a service and its history |
+| GET | `/api/services/logs/{id}?limit=` | Bearer | Recent check history (chart-ready) |
+| GET | `/api/services/metrics/{id}` | Bearer | Live uptime/latency/status |
+| GET | `/api/services/{id}/analytics?windowDays=` | Bearer | Historical analytics |
+| GET | `/api/services/summary` | Bearer | Count of your monitored services |
+| GET | `/actuator/health` | Public | Liveness/readiness |
+| GET | `/actuator/info` | Public | Build/app info |
 
 ## Environment variables
 
-See `.env.example` (Docker) and each service's `.env.example` for the full list.
-The important ones:
+See `.env.example` for every variable wired through Docker Compose (with the same
+defaults `application.yml` falls back to if unset). The ones that matter most:
 
 | Variable | Default | Description |
 |---|---|---|
+| `JWT_SECRET` | *(required in Docker)* | Signing key for tokens - generate a real random value |
+| `JWT_EXPIRATION_MS` | `86400000` (24h) | Token lifetime |
 | `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` | localhost / postgres / postgres | Database connection |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated allowed origins |
-| `MONITOR_SCHEDULER_FIXED_RATE_MS` | `60000` | How often the global check sweep runs |
-| `MONITOR_HEALTHCHECK_TIMEOUT_MS` | `5000` | Per-request timeout |
-| `MONITOR_HEALTHCHECK_CONCURRENCY` | `8` | Max concurrent checks per sweep |
-| `MONITOR_STATUS_SLOW_MS` / `MONITOR_STATUS_DOWN_MS` | `400` / `800` | Latency thresholds for SLOW/DOWN |
-| `VITE_API_BASE_URL` | `http://localhost:8080/api` (dev) / `/api` (Docker) | Where the frontend sends requests |
+| `MONITOR_SCHEDULER_FIXED_RATE_MS` | `15000` | How often the scheduler checks for due services |
+| `MONITOR_HEALTHCHECK_DEFAULT_INTERVAL_S` | `60` | Default per-service check interval |
+| `MONITOR_HEALTHCHECK_MIN_INTERVAL_S` / `MAX_INTERVAL_S` | `15` / `3600` | Allowed interval range |
+| `MONITOR_ANALYTICS_WINDOW_DAYS` | `30` | Default analytics lookback window |
+| `VITE_API_BASE_URL` | `http://localhost:8080/api` (dev) / `/api` (Docker) | Frontend API target |
 
-## Future roadmap
+## Screenshots
 
-Deliberately **not** implemented in this phase - the architecture above was shaped to
-make each of these a contained addition rather than a rewrite:
+<!-- Add screenshots here, e.g.: ![Dashboard](docs/screenshots/dashboard.png) -->
 
-- JWT authentication + multi-user support (services would gain an `owner_id`; every
-  repository method and controller endpoint would scope by the authenticated user)
-- Per-service configurable interval/timeout/retry policy (the global `monitor.*`
-  properties become per-`ApiService` columns; `HealthCheckService` already takes a
-  `MonitorProperties` per call, so this is a signature change, not new architecture)
-- Email alerts + alert preferences
+Not included yet. Run `docker compose up --build`, open `http://localhost:5173`,
+and register an account to see it live — the dashboard renders stat widgets (total/
+online/offline services, average latency, average uptime) above a searchable service
+list with per-row latency sparklines and uptime meters, and each service's detail page
+shows a latency chart, an uptime trend chart, and a 30-day analytics panel.
+
+## Notable engineering decisions
+
+A few things worth calling out for anyone reading the code, not just running it:
+
+- **Redirects are never followed on health checks.** The outbound HTTP client
+  explicitly disables `followRedirect` rather than relying on the library default — a
+  redirect to another host would otherwise never pass through the SSRF validator at
+  all, since the destination is a URL it never saw. A 3xx response is simply recorded
+  as a failed check.
+- **Status is classified from the single latest check, not an average.** Averaging
+  would smooth over exactly the signal a status page exists to surface — a service that
+  just went down still needs to say "DOWN" immediately, not "mostly fine on average."
+- **Outage/recovery detection is a sequential scan, not a `GROUP BY` aggregate**,
+  because "how many times did this go down and come back" is fundamentally a
+  transition-detection question over ordered rows, not something an aggregate query can
+  answer directly. It's a bounded, time-windowed scan (not "all history ever"), which is
+  the right scale trade-off for a self-hosted tool's actual data volume.
+- **Ownership is enforced at the repository layer, twice.** Every service/log lookup is
+  scoped by owner id in the query itself (`findByIdAndOwnerId`), not filtered
+  afterward in the controller — and a mismatched id 404s rather than 403s, so it never
+  even confirms to a non-owner that a given id exists.
+
+## Production note on schema management
+
+`spring.jpa.hibernate.ddl-auto=update` is convenient for `docker compose up --build`
+requiring zero manual steps, which is exactly the point of this Docker setup — but
+`update` is not what you'd run against a real production database (it can't handle
+destructive changes safely and gives no migration history). A genuine production
+deployment should replace it with a real migration tool (Flyway or Liquibase) and
+`ddl-auto=validate`.
+
+## Roadmap
+
+Deliberately not implemented in this phase, with the architecture shaped to make each a
+contained addition:
+
+- Role-based authorization beyond `USER` (the `Role` enum and `CustomUserDetails`
+  authority mapping are already structured for it)
+- Email alerts + alert preferences (per-service thresholds on top of the interval/
+  retry config that already exists)
 - Incident timeline, maintenance windows, public status pages
-- Flapping detection (services that toggle UP/DOWN repeatedly in a short window)
-- Deployment (frontend → Vercel/Netlify, backend → Railway/Render, DB → managed Postgres)
+- Flapping detection (services toggling up/down repeatedly in a short window — the
+  outage-transition scan in `AnalyticsService` is most of the groundwork already)
+- Flyway/Liquibase migrations (see production note above)
 - CI/CD via GitHub Actions
-- springdoc-openapi (Swagger UI)
-- Spring Boot Actuator + Prometheus/Grafana (the app monitoring itself)
+- Prometheus/Grafana (Actuator already exposes a scrapable `/actuator/metrics`
+  endpoint)
+- Refresh tokens / server-side token revocation
+
+## License
+
+MIT — see [LICENSE](LICENSE).

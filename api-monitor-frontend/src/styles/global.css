@@ -1,103 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens as RGB triplets (not hex) so Tailwind's <alpha-value> opacity modifiers
+   (e.g. bg-surface/50) work - see tailwind.config.js. Dark is the default brand feel for
+   a monitoring tool; .light overrides it. */
+:root {
+  --surface: 8 11 20;           /* page background */
+  --surface-raised: 15 20 33;   /* cards, panels */
+  --surface-hover: 22 28 45;
+  --surface-sunken: 5 8 15;     /* wells: table headers, code, meters */
+  --border: 30 38 58;
+  --border-strong: 45 55 80;
+  --text-primary: 241 245 249;
+  --text-secondary: 148 163 184;
+  --text-muted: 100 116 139;
+  /* Brand colour when used as *text or icon* on a tinted background. A mid indigo that
+     works on near-black is unreadable on white, so this stop flips with the theme
+     instead of hardcoding brand-400 everywhere. */
+  --brand-fg: 165 180 252;
+}
+
+.light {
+  --surface: 246 248 251;
+  --surface-raised: 255 255 255;
+  --surface-hover: 241 245 249;
+  --surface-sunken: 241 245 249;
+  --border: 226 232 240;
+  --border-strong: 203 213 225;
+  --text-primary: 15 23 42;
+  --text-secondary: 71 85 105;
+  --text-muted: 100 116 139;
+  --brand-fg: 79 70 229;
+}
+
 body {
-  margin: 0;
-  background: #020617;
-  color: white;
-  font-family: Inter, Arial;
+  @apply bg-surface text-text-primary font-sans antialiased;
 }
 
-.container {
-  max-width: 1300px;
-  margin: auto;
-  padding: 40px;
+/* Two soft colour washes anchored to the top corners. Without them the dark theme is a
+   flat black rectangle; with them the page has a light source and the cards read as
+   sitting on top of something. */
+.app-backdrop {
+  background-image:
+    radial-gradient(60rem 40rem at 12% -10%, rgb(99 102 241 / 0.12), transparent 60%),
+    radial-gradient(45rem 32rem at 100% 0%, rgb(6 182 212 / 0.09), transparent 55%);
 }
 
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
+/* Keep scrollbars from breaking the dark surface with a bright OS-default track. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--border-strong)) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--border-strong));
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 
+/* A handful of small, reused component classes - Tailwind utilities everywhere else,
+   but repeating this exact combination on every card/button would be noisy. */
 .card {
-  background: #0f172a;
-  border: 1px solid #1e293b;
-  padding: 20px;
-  border-radius: 12px;
+  @apply bg-surface-raised border border-border rounded-xl shadow-card;
 }
 
-.chart {
-  background: #0f172a;
-  border: 1px solid #1e293b;
-  padding: 20px;
-  border-radius: 12px;
-  margin-top: 20px;
+/* Opt-in hover treatment for cards that are links or otherwise clickable. */
+.card-interactive {
+  @apply transition-all duration-200 hover:border-border-strong hover:shadow-lift;
 }
 
-.badge {
-  padding: 4px 10px;
-  border-radius: 8px;
-  font-size: 12px;
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2
+    text-sm font-medium text-white shadow-sm transition-all hover:bg-brand-700
+    hover:shadow-glow focus-visible:outline-none focus-visible:ring-2
+    focus-visible:ring-brand-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface
+    disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-sm;
 }
 
-.green {
-  background: #064e3b;
-  color: #22c55e;
+.btn-secondary {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg border border-border
+    bg-surface-raised px-4 py-2 text-sm font-medium text-text-primary transition-colors
+    hover:border-border-strong hover:bg-surface-hover focus-visible:outline-none
+    focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2
+    focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-50;
 }
 
-.yellow {
-  background: #713f12;
-  color: #facc15;
+.btn-ghost {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm
+    font-medium text-text-secondary transition-colors hover:bg-surface-hover
+    hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50;
 }
 
-.red {
-  background: #7f1d1d;
-  color: #ef4444;
+.input {
+  @apply w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm
+    text-text-primary placeholder:text-text-muted outline-none transition-colors
+    focus:border-brand-500 focus:ring-1 focus:ring-brand-500;
 }
 
-.neutral {
-  background: #1e293b;
-  color: #94a3b8;
+.label {
+  @apply mb-1.5 block text-sm font-medium text-text-secondary;
 }
 
-form {
-  margin-bottom: 30px;
+/* Small pill for counts, tags and inline metadata. */
+.chip {
+  @apply inline-flex items-center gap-1.5 rounded-full border border-border
+    bg-surface px-2.5 py-1 text-xs font-medium text-text-secondary;
 }
 
-input {
-  padding: 8px;
-  margin-right: 10px;
-  border-radius: 6px;
-  border: none;
+/* Section eyebrow above a group of cards. */
+.eyebrow {
+  @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted;
 }
 
-button {
-  padding: 8px 16px;
-  background: #22c55e;
-  border: none;
-  border-radius: 6px;
-  color: white;
-  cursor: pointer;
+.gradient-text {
+  @apply bg-gradient-to-r from-brand-400 to-accent-400 bg-clip-text text-transparent;
 }
 
-button:disabled {
-  background: #14532d;
-  cursor: not-allowed;
+/* Skeleton sweep - a moving highlight reads as "loading" far better than a bare pulse. */
+.skeleton {
+  @apply relative overflow-hidden rounded bg-surface-hover;
 }
-
-.form-error {
-  color: #ef4444;
-  font-size: 13px;
-  margin-top: 8px;
-}
-
-.error-banner {
-  background: #7f1d1d;
-  color: #fecaca;
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-}
-
-.loading {
-  color: #94a3b8;
-  padding: 20px 0;
+.skeleton::after {
+  content: "";
+  /* Tinted with the text colour rather than white, so the sweep is visible in both
+     themes instead of disappearing against a light surface. */
+  @apply absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r
+    from-transparent via-text-primary/[0.07] to-transparent;
 }

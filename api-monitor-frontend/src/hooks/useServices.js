@@ -1,46 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createService, getLogs, getMetrics, getServices } from "../api/services";
+import { createService, deleteService, getLogs, getMetrics, getServices } from "../api/services";
 import { POLL_INTERVAL_MS } from "../config/env";
 
+// Enough points for a legible row sparkline without pulling a full history per service
+// on every poll.
+const SPARKLINE_POINTS = 24;
+
 /**
- * Owns all data-fetching for the dashboard: the service list, each service's recent
- * logs (for the latency chart) and metrics (uptime/status), polled on an interval.
- * Pulling this out of the page component means Dashboard.jsx is just layout, and this
- * hook could be unit-tested (e.g. with @testing-library/react-hooks) independently of
- * any rendering.
+ * Owns all data-fetching for the dashboard: the service list, each service's live
+ * metrics, and a short slice of recent checks for the row sparklines - all polled on an
+ * interval. Kept out of the page component so DashboardPage stays layout-only.
  */
 export function useServices() {
   const [services, setServices] = useState([]);
-  const [logsByService, setLogsByService] = useState({});
   const [metricsByService, setMetricsByService] = useState({});
+  const [historyByService, setHistoryByService] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
 
-  // Avoids setting state after the component using this hook has unmounted.
   const isMounted = useRef(true);
-  useEffect(() => () => { isMounted.current = false; }, []);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
 
-  const loadServiceDetails = useCallback((service) => {
-    getLogs(service.id)
-      .then((res) => {
-        if (!isMounted.current) return;
-        const points = res.data.map((log, index) => ({
-          time: index,
-          latency: log.responseTimeMs,
-        }));
-        setLogsByService((prev) => ({ ...prev, [service.id]: points }));
-      })
-      .catch(() => {
-        // A single service's logs failing to load shouldn't blank out the whole
-        // dashboard - the chart for that card just stays empty until the next poll.
-      });
-
+  const loadMetrics = useCallback((service) => {
     getMetrics(service.id)
       .then((res) => {
         if (!isMounted.current) return;
         setMetricsByService((prev) => ({ ...prev, [service.id]: res.data }));
       })
-      .catch(() => {});
+      .catch(() => {
+        // A single service's metrics failing to load shouldn't blank out the whole
+        // dashboard - that row just shows an "Unknown" status until the next poll.
+      });
+  }, []);
+
+  const loadHistory = useCallback((service) => {
+    getLogs(service.id, SPARKLINE_POINTS)
+      .then((res) => {
+        if (!isMounted.current) return;
+        // Logs arrive oldest-first, which is the order the sparkline draws in.
+        setHistoryByService((prev) => ({ ...prev, [service.id]: res.data }));
+      })
+      .catch(() => {
+        // Purely decorative on this page - a failure just means no sparkline for now.
+      });
   }, []);
 
   const load = useCallback(() => {
@@ -49,27 +55,59 @@ export function useServices() {
         if (!isMounted.current) return;
         setServices(res.data);
         setError(null);
-        res.data.forEach(loadServiceDetails);
+        res.data.forEach((service) => {
+          loadMetrics(service);
+          loadHistory(service);
+        });
       })
       .catch((err) => {
         if (!isMounted.current) return;
         setError(err.message);
       })
       .finally(() => {
-        if (isMounted.current) setLoading(false);
+        if (!isMounted.current) return;
+        setLoading(false);
+        setLastUpdatedAt(Date.now());
       });
-  }, [loadServiceDetails]);
+  }, [loadMetrics, loadHistory]);
 
   useEffect(() => {
     load();
     const interval = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
+
+    // Chrome/Firefox throttle setInterval heavily in background tabs, so switching away
+    // and back can make polling look stalled for a while - refreshing immediately on
+    // refocus closes that gap instead of waiting out the throttled interval.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [load]);
 
   const addService = useCallback(
-    (name, url) => createService({ name, url }).then(load),
+    (payload) => createService(payload).then(load),
     [load]
   );
 
-  return { services, logsByService, metricsByService, loading, error, addService };
+  const removeService = useCallback(
+    (id) => deleteService(id).then(load),
+    [load]
+  );
+
+  return {
+    services,
+    metricsByService,
+    historyByService,
+    loading,
+    error,
+    lastUpdatedAt,
+    addService,
+    removeService,
+    refresh: load,
+  };
 }

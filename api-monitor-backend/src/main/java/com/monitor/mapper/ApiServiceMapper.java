@@ -21,6 +21,8 @@ public final class ApiServiceMapper {
                 entity.getId(),
                 entity.getName(),
                 entity.getUrl(),
+                entity.getIntervalSeconds(),
+                entity.getLastCheckedAt(),
                 entity.getCreatedAt()
         );
     }

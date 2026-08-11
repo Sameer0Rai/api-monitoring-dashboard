@@ -16,9 +16,62 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+# --- Actuator ---------------------------------------------------------------
+# Only health/info/metrics are exposed - not the full actuator surface (env, beans,
+# heapdump, etc.), which would leak internal configuration on a publicly reachable port.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      # Splits /actuator/health into liveness (is the process alive) and readiness
+      # (is it ready to serve traffic, i.e. DB reachable) groups - what Kubernetes-style
+      # probes and Docker healthchecks actually want to check independently.
+      probes:
+        enabled: true
+      show-details: when-authorized
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+info:
+  app:
+    name: API Monitoring Dashboard
+    description: Self-hosted API uptime/latency monitoring platform
+    version: 0.4.0
+
+# --- Security / JWT ----------------------------------------------------------
+security:
+  jwt:
+    # No default for the secret in any environment that matters (see SecurityConfig /
+    # JwtService) - docker-compose requires JWT_SECRET to be set explicitly. The
+    # fallback below only exists so `mvn test` and local `spring-boot:run` don't
+    # need a .env file just to boot; it is intentionally obviously not production-safe.
+    secret: ${JWT_SECRET:dev-only-secret-do-not-use-in-production-please-change-me-123456}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000} # 24h
+  reset-token:
+    expiration-minutes: ${RESET_TOKEN_EXPIRATION_MINUTES:30}
+
+# --- App-level -----------------------------------------------------------------
+app:
+  # Used to build the password reset link sent by MailService / AuthService#forgotPassword.
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+
+# --- Email --------------------------------------------------------------------
+# Optional - see MailService. If username/password are left blank (the default), the
+# password-reset link is logged instead of emailed, so this never blocks booting locally.
+mail:
+  host: ${MAIL_HOST:smtp.gmail.com}
+  port: ${MAIL_PORT:587}
+  username: ${MAIL_USERNAME:}
+  password: ${MAIL_PASSWORD:}
+
 monitor:
   scheduler:
-    fixed-rate-ms: ${MONITOR_SCHEDULER_FIXED_RATE_MS:60000}
+    fixed-rate-ms: ${MONITOR_SCHEDULER_FIXED_RATE_MS:15000}
   health-check:
     request-timeout-ms: ${MONITOR_HEALTHCHECK_TIMEOUT_MS:5000}
     connect-timeout-ms: ${MONITOR_HEALTHCHECK_CONNECT_TIMEOUT_MS:3000}
@@ -26,14 +79,27 @@ monitor:
     backoff-initial-ms: ${MONITOR_HEALTHCHECK_BACKOFF_MS:500}
     concurrency: ${MONITOR_HEALTHCHECK_CONCURRENCY:8}
     total-sweep-timeout-ms: ${MONITOR_HEALTHCHECK_SWEEP_TIMEOUT_MS:30000}
+    default-interval-seconds: ${MONITOR_HEALTHCHECK_DEFAULT_INTERVAL_S:60}
+    min-interval-seconds: ${MONITOR_HEALTHCHECK_MIN_INTERVAL_S:15}
+    max-interval-seconds: ${MONITOR_HEALTHCHECK_MAX_INTERVAL_S:3600}
   status:
     slow-threshold-ms: ${MONITOR_STATUS_SLOW_MS:400}
-    down-threshold-ms: ${MONITOR_STATUS_DOWN_MS:800}
   logs:
     default-limit: ${MONITOR_LOGS_DEFAULT_LIMIT:50}
     max-limit: ${MONITOR_LOGS_MAX_LIMIT:500}
+  analytics:
+    default-window-days: ${MONITOR_ANALYTICS_WINDOW_DAYS:30}
+    min-window-days: ${MONITOR_ANALYTICS_MIN_WINDOW_DAYS:1}
+    max-window-days: ${MONITOR_ANALYTICS_MAX_WINDOW_DAYS:365}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
+# --- OpenAPI / Swagger --------------------------------------------------------
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
 
 logging:
   level:

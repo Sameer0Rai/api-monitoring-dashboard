@@ -1,6 +1,7 @@
 package com.monitor.config;
 
 import io.netty.channel.ChannelOption;
+import com.monitor.security.UrlSecurityValidator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
@@ -25,6 +26,15 @@ import java.time.Duration;
  * level, so every request through this WebClient is bounded by default. Retry/backoff
  * behavior is applied per-call in HealthCheckService, since that is where the service
  * being checked (and therefore the log entry to fail) is known.</p>
+ *
+ * <p><b>Redirects are explicitly not followed.</b> {@link UrlSecurityValidator} validates
+ * the registered URL (and re-validates it before every check, to reduce DNS-rebinding
+ * risk) - but that validation only ever inspects the URL the user gave us. If the client
+ * silently followed a 3xx response to a different host, that destination would never go
+ * through the same SSRF check, defeating it entirely (e.g. a public URL that redirects to
+ * {@code http://169.254.169.254/}). A 3xx response is therefore returned as-is to
+ * {@code HealthCheckService}, which records it as a failed check (its status code is
+ * outside the 2xx range) rather than transparently chasing it.</p>
  */
 @Configuration
 public class WebClientConfig {
@@ -34,7 +44,9 @@ public class WebClientConfig {
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS,
                         (int) properties.healthCheck().connectTimeoutMs())
-                .responseTimeout(Duration.ofMillis(properties.healthCheck().requestTimeoutMs()));
+                .responseTimeout(Duration.ofMillis(properties.healthCheck().requestTimeoutMs()))
+                // Explicit, not relying on the library default - see class doc above.
+                .followRedirect(false);
 
         return WebClient.builder()
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
