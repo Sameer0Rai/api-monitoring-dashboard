@@ -3,8 +3,8 @@ spring:
     name: api-monitor
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/api_monitor}
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
+    username: ${DB_USERNAME:}
+    password: ${DB_PASSWORD:}
   jpa:
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:update}
