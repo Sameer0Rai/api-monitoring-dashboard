@@ -1,8 +1,10 @@
 import { NavLink } from "react-router-dom";
-import { Activity, BookOpen, LayoutDashboard } from "lucide-react";
+import { Activity, BookOpen, Github, LayoutDashboard, Mail } from "lucide-react";
 import { API_ORIGIN } from "../../config/env";
 
 const SWAGGER_URL = `${API_ORIGIN}/swagger-ui.html`;
+const CONTACT_EMAIL = "sameer.0rai0@gmail.com";
+const GITHUB_URL = "https://github.com/Sameer0Rai";
 
 export default function Sidebar() {
   const linkClasses = ({ isActive }) =>
@@ -54,6 +56,26 @@ export default function Sidebar() {
           API docs
         </a>
         <p className="px-3 text-[11px] text-text-muted">API Monitoring Dashboard v0.4</p>
+
+        <div className="flex items-center gap-1 px-3">
+          <a
+            href={`mailto:${CONTACT_EMAIL}`}
+            title={CONTACT_EMAIL}
+            className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
+          >
+            <Mail className="h-3.5 w-3.5" />
+          </a>
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noreferrer"
+            title="GitHub"
+            className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
+          >
+            <Github className="h-3.5 w-3.5" />
+          </a>
+          <p className="px-1 text-[11px] text-text-muted">Made by Sameer Rai</p>
+        </div>
       </div>
     </aside>
   );
