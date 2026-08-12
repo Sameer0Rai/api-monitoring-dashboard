@@ -30,4 +30,11 @@ USER monitor
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Explicit memory bounds, not JVM defaults - Java 17 is container-aware and will size
+# the heap off available RAM, but leaves metaspace/thread-stacks/native memory
+# effectively uncapped. On a full-size server that's fine; on a memory-constrained
+# free-tier host (512MB) it lets total RSS creep past the container's limit over time,
+# which gets the process SIGKILLed by the host's OOM killer (exit code 137) rather than
+# failing predictably inside the JVM. SerialGC also has far lower memory overhead than
+# the default G1GC, which matters more than its lower throughput at this scale.
+ENTRYPOINT ["java", "-Xmx300m", "-XX:MaxMetaspaceSize=128m", "-Xss256k", "-XX:+UseSerialGC", "-jar", "app.jar"]
