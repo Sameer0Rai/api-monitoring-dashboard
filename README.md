@@ -12,6 +12,10 @@ failures before declaring them down, and turns that history into a live dashboar
 historical analytics — uptime %, latency trends, outage counts, recovery time — all
 backed by Postgres, not just whatever happens to be in memory.
 
+**Live demo:** [api-monitoring-platform-w4nj.onrender.com](https://api-monitoring-platform-w4nj.onrender.com/)
+— hosted on Render's free tier, so the first request after a period of inactivity can
+take 30-60s to wake the instance back up. Give it a moment on first load.
+
 ## Features
 
 - **JWT authentication** with per-user data ownership — every service and its history
@@ -228,11 +232,12 @@ defaults `application.yml` falls back to if unset). The ones that matter most:
 
 <!-- Add screenshots here, e.g.: ![Dashboard](docs/screenshots/dashboard.png) -->
 
-Not included yet. Run `docker compose up --build`, open `http://localhost:5173`,
-and register an account to see it live — the dashboard renders stat widgets (total/
-online/offline services, average latency, average uptime) above a searchable service
-list with per-row latency sparklines and uptime meters, and each service's detail page
-shows a latency chart, an uptime trend chart, and a 30-day analytics panel.
+Not included yet — try the [live demo](https://api-monitoring-platform-w4nj.onrender.com/)
+instead, or run `docker compose up --build` and open `http://localhost:5173`. Register
+an account to see it live — the dashboard renders stat widgets (total/online/offline
+services, average latency, average uptime) above a searchable service list with per-row
+latency sparklines and uptime meters, and each service's detail page shows a latency
+chart, an uptime trend chart, and a 30-day analytics panel.
 
 ## Notable engineering decisions
 
