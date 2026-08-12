@@ -5,6 +5,11 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/api_monitor}
     username: ${DB_USERNAME:}
     password: ${DB_PASSWORD:}
+    hikari:
+      # Default is 10 - massive overkill for this app's actual concurrency, and each idle
+      # connection still costs memory on both the JVM side and a constrained free-tier
+      # Postgres instance's side. 5 is plenty for a single-instance demo deployment.
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:5}
   jpa:
     hibernate:
       ddl-auto: ${JPA_DDL_AUTO:update}
@@ -16,6 +21,13 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  tomcat:
+    threads:
+      # Default max is 200 - sized for real server hardware, not a fractional-CPU
+      # free-tier instance. Each thread also reserves its own stack (see Dockerfile's
+      # -Xss), so a smaller pool directly reduces baseline memory too.
+      max: ${TOMCAT_MAX_THREADS:20}
+      min-spare: ${TOMCAT_MIN_SPARE_THREADS:4}
 
 # --- Actuator ---------------------------------------------------------------
 # Only health/info/metrics are exposed - not the full actuator surface (env, beans,

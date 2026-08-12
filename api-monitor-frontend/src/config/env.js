@@ -12,7 +12,10 @@ export const API_ORIGIN = /^https?:\/\//i.test(API_BASE_URL)
   ? API_BASE_URL.replace(/\/api\/?$/, "")
   : window.location.origin;
 
-export const POLL_INTERVAL_MS = 10000;
+// Every poll fires GET /services plus 2 more requests per monitored service (metrics +
+// logs) - on a CPU-limited free-tier host that fan-out adds up fast at a 10s cadence.
+// 30s is still fresh enough for a demo without piling up concurrent requests behind it.
+export const POLL_INTERVAL_MS = 30000;
 export const TOKEN_STORAGE_KEY = "monitor.token";
 export const EMAIL_STORAGE_KEY = "monitor.email";
 export const THEME_STORAGE_KEY = "monitor.theme";
