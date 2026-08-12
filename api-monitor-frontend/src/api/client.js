@@ -4,9 +4,12 @@ import { API_BASE_URL, TOKEN_STORAGE_KEY } from "../config/env";
 // Every backend response is wrapped as { success, data, message, timestamp }. The response
 // interceptor unwraps that envelope once, here, so the rest of the app just works with
 // plain data/errors like it would against any REST API.
+// 60s, not 10s - a free-tier host (Render, etc.) can take 30-90s to wake back up from
+// being spun down after inactivity, and the first request after a cold spell needs to
+// survive that wait rather than timing out before the backend has even started.
 const client = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 60000,
 });
 
 client.interceptors.request.use((config) => {

@@ -52,7 +52,7 @@ security:
     # fallback below only exists so `mvn test` and local `spring-boot:run` don't
     # need a .env file just to boot; it is intentionally obviously not production-safe.
     secret: ${JWT_SECRET:dev-only-secret-do-not-use-in-production-please-change-me-123456}
-    expiration-ms: ${JWT_EXPIRATION_MS:86400000} # 24h
+    expiration-ms: ${JWT_EXPIRATION_MS:10800000} # 3h
   reset-token:
     expiration-minutes: ${RESET_TOKEN_EXPIRATION_MINUTES:30}
 
